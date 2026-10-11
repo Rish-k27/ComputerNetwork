@@ -1,0 +1,244 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 30905
+#define BUFFER_SIZE 1024
+
+int main(int argc, char *argv[])
+{
+    if (argc != 3)
+    {
+        printf("Usage: %s <server_ip> <roll>\n", argv[0]);
+        return 1;
+    }
+
+    int sockfd;
+    char input[BUFFER_SIZE];
+    char message[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
+
+    struct sockaddr_in server_addr;
+    socklen_t addr_len = sizeof(server_addr);
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sockfd < 0)
+    {
+        perror("Socket creation failed");
+        return 1;
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+
+    if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) <= 0)
+    {
+        perror("Invalid IP address");
+        close(sockfd);
+        return 1;
+    }
+
+    while (1)
+    {
+        printf("Enter text (or EXIT): ");
+
+        if (fgets(input, sizeof(input), stdin) == NULL)
+            break;
+
+        input[strcspn(input, "\n")] = '\0';
+
+        sprintf(message, "%s#%s", argv[2], input);
+
+        sendto(sockfd,
+               message,
+               strlen(message),
+               0,
+               (struct sockaddr *)&server_addr,
+               addr_len);
+
+        int n = recvfrom(sockfd,
+                         buffer,
+                         BUFFER_SIZE - 1,
+                         0,
+                         NULL,
+                         NULL);
+
+        if (n < 0)
+        {
+            perror("recvfrom failed");
+            continue;
+        }
+
+        buffer[n] = '\0';
+
+        printf("Server Response: %s\n", buffer);
+
+        if (strcmp(input, "EXIT") == 0)
+            break;
+    }
+
+    close(sockfd);
+    return 0;
+}
+
+
+------------------------------------------------------SERVER---------------------------------------------------------------------
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 30905
+#define BUFFER_SIZE 1024
+#define ROLL "25157142905"
+
+int main()
+{
+    int sockfd;
+    char buffer[BUFFER_SIZE];
+    char response[BUFFER_SIZE];
+
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sockfd < 0)
+    {
+        perror("Socket creation failed");
+        return 1;
+    }
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    if (bind(sockfd,
+             (struct sockaddr *)&server_addr,
+             sizeof(server_addr)) < 0)
+    {
+        perror("Bind failed");
+        return 1;
+    }
+
+    printf("Server running on port %d\n", PORT);
+
+    while (1)
+    {
+        int n = recvfrom(sockfd,
+                         buffer,
+                         BUFFER_SIZE - 1,
+                         0,
+                         (struct sockaddr *)&client_addr,
+                         &client_len);
+
+        if (n < 0)
+        {
+            perror("recvfrom failed");
+            continue;
+        }
+
+        buffer[n] = '\0';
+
+        char *hash = strchr(buffer, '#');
+
+        if (hash == NULL)
+        {
+            strcpy(response, "ERROR: Invalid Format");
+
+            sendto(sockfd,
+                   response,
+                   strlen(response),
+                   0,
+                   (struct sockaddr *)&client_addr,
+                   client_len);
+
+            continue;
+        }
+
+        *hash = '\0';
+
+        if (strcmp(buffer, ROLL) != 0)
+        {
+            strcpy(response, "ERROR: Unauthorized client");
+
+            sendto(sockfd,
+                   response,
+                   strlen(response),
+                   0,
+                   (struct sockaddr *)&client_addr,
+                   client_len);
+
+            continue;
+        }
+
+        char *text = hash + 1;
+
+        if (strcmp(text, "EXIT") == 0)
+        {
+            strcpy(response, "Server shutting down");
+
+            sendto(sockfd,
+                   response,
+                   strlen(response),
+                   0,
+                   (struct sockaddr *)&client_addr,
+                   client_len);
+
+            break;
+        }
+
+        int len = strlen(text);
+        int vowels = 0;
+        int consonants = 0;
+        int digits = 0;
+
+        for (int i = 0; text[i] != '\0'; i++)
+        {
+            char ch = tolower((unsigned char)text[i]);
+
+            if (isdigit(ch))
+            {
+                digits++;
+            }
+            else if (isalpha(ch))
+            {
+                if (ch == 'a' || ch == 'e' ||
+                    ch == 'i' || ch == 'o' ||
+                    ch == 'u')
+                {
+                    vowels++;
+                }
+                else
+                {
+                    consonants++;
+                }
+            }
+        }
+
+        sprintf(response,
+                "LEN=%d;VOWELS=%d;CONSONANTS=%d;DIGITS=%d",
+                len,
+                vowels,
+                consonants,
+                digits);
+
+        sendto(sockfd,
+               response,
+               strlen(response),
+               0,
+               (struct sockaddr *)&client_addr,
+               client_len);
+    }
+
+    close(sockfd);
+    return 0;
+}
